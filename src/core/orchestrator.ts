@@ -62,6 +62,54 @@ function savePromptLog(stageIndex: number, stageId: string, prompt: string, resp
   log(`Saved prompt log: ${promptPath} (${prompt.length} chars), response: ${responsePath} (${response.length} chars)`);
 }
 
+function getStageConstraints(stageId: string): string | null {
+  const constraints: Record<string, string> = {
+    task: `## STRICT STAGE BOUNDARIES
+You are on the TASK DEFINITION stage. You may ONLY:
+- Ask the user questions to clarify requirements
+- Formulate the task description
+You must NOT: read project files, write code, run any commands, explore project structure, propose architecture.`,
+
+    analysis: `## STRICT STAGE BOUNDARIES
+You are on the ANALYSIS stage. You may ONLY:
+- Read files (read, cat, grep, find, glob)
+- Study project structure and patterns
+- Read configuration files
+You must NOT: write or modify files, run commands (gradle, npm, tests, build), create files, install dependencies.`,
+
+    implementation: `## STRICT STAGE BOUNDARIES
+You are on the IMPLEMENTATION stage. You may ONLY:
+- Read files for context
+- Create and modify source code files
+You must NOT: run tests (./gradlew test, npm test), run linters (detekt, ktlint, eslint), run builds (./gradlew build, npm run build), run any verification commands. Other stages handle verification.`,
+
+    lint: `## STRICT STAGE BOUNDARIES
+You are on the LINT stage. You may ONLY:
+- Run lint/static analysis commands ONLY (detekt, ktlint, eslint, lint)
+- Read files to identify error locations
+You must NOT: fix code errors, modify files, run tests, run full builds, run compile tasks.`,
+
+    test: `## STRICT STAGE BOUNDARIES
+You are on the TESTING stage. You may ONLY:
+- Run build/compile commands
+- Run test commands
+- Read error logs
+You must NOT: fix tests or code, modify files, run linters, write new tests.`,
+
+    review: `## STRICT STAGE BOUNDARIES
+You are on the REVIEW stage. You may ONLY:
+- Read source files for review
+- Read git diff/log
+You must NOT: modify files, run tests, run linters, run any commands except git read-only.`,
+
+    done: `## STRICT STAGE BOUNDARIES
+You are on the SUMMARY stage. You may ONLY:
+- Read reports and git log/diff
+You must NOT: modify files, run commands, write code.`,
+  };
+  return constraints[stageId] ?? null;
+}
+
 export type OrchestratorEvent =
   | { type: "stage:start"; stageIndex: number; stage: StageConfig }
   | { type: "stage:progress"; stageIndex: number; message: string }
@@ -360,6 +408,11 @@ export class Orchestrator extends EventEmitter {
 
     let prompt = `# FLOWCODE STAGE: ${stage.name}\n\n`;
     prompt += `You are executing stage "${stage.name}" (ID: ${stage.id}) in a flowcode pipeline.\n\n`;
+
+    const constraints = getStageConstraints(stage.id);
+    if (constraints) {
+      prompt += `${constraints}\n\n`;
+    }
 
     if (stage.interactive) {
       prompt += `## MODE: INTERACTIVE\nYou are in interactive mode. Ask the user questions to understand the task. When you have a clear understanding, set action to "complete" with a detailed summary.\n\n`;

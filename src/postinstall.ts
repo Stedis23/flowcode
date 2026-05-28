@@ -21,16 +21,14 @@ if (!existsSync(targetDir)) {
   mkdirSync(targetDir, { recursive: true });
 }
 
-if (existsSync(sourceDir)) {
+  if (existsSync(sourceDir)) {
   const files = readdirSync(sourceDir).filter((f) => f.endsWith(".md"));
   let copied = 0;
   for (const file of files) {
     const src = join(sourceDir, file);
     const dst = join(targetDir, file);
-    if (!existsSync(dst)) {
-      copyFileSync(src, dst);
-      copied++;
-    }
+    copyFileSync(src, dst);
+    copied++;
   }
   if (copied > 0) {
     console.log(`flowcode: installed ${copied} default skills to ${targetDir}`);
