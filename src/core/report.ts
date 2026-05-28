@@ -100,6 +100,7 @@ export function saveReport(stageIndex: number, stageId: string, report: StageRep
 
 **Stage:** ${report.stageId}
 **Timestamp:** ${report.timestamp}
+**Action:** ${report.action.action}
 
 ## Summary
 ${report.summary}
@@ -109,6 +110,9 @@ ${report.filesChanged.length > 0 ? report.filesChanged.map((f) => `- ${f}`).join
 
 ## Issues
 ${report.issues.length > 0 ? report.issues.map((i) => `- ${i}`).join("\n") : "No issues."}
+
+## Full Agent Response
+${report.fullResponse || "(no response captured)"}
 `;
 
   writeFileSync(mdPath, mdContent, "utf-8");

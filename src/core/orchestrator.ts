@@ -50,6 +50,18 @@ function log(msg: string): void {
   appendFileSync(logPath, `[${new Date().toISOString()}] ${msg}\n`, "utf-8");
 }
 
+function savePromptLog(stageIndex: number, stageId: string, prompt: string, response: string): void {
+  const dir = join(process.cwd(), ".flowcode", "prompts");
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const prefix = String(stageIndex + 1).padStart(2, "0");
+  const promptPath = join(dir, `${prefix}-${stageId}-prompt.txt`);
+  const responsePath = join(dir, `${prefix}-${stageId}-response.txt`);
+  const { writeFileSync } = require("node:fs") as typeof import("node:fs");
+  writeFileSync(promptPath, prompt, "utf-8");
+  writeFileSync(responsePath, response, "utf-8");
+  log(`Saved prompt log: ${promptPath} (${prompt.length} chars), response: ${responsePath} (${response.length} chars)`);
+}
+
 export type OrchestratorEvent =
   | { type: "stage:start"; stageIndex: number; stage: StageConfig }
   | { type: "stage:progress"; stageIndex: number; message: string }
@@ -82,6 +94,7 @@ export class Orchestrator extends EventEmitter {
   private interactiveStage: StageConfig | null = null;
   private interactiveFirstMessage = true;
   private conventions: ProjectConventions | null = null;
+  private lastStageResponse: string = "";
 
   constructor(flowName: string = "default") {
     super();
@@ -197,7 +210,7 @@ export class Orchestrator extends EventEmitter {
           continue;
         }
 
-        const report = this.buildStageReport(i, stage, action);
+        const report = this.buildStageReport(i, stage, action, this.lastStageResponse);
         saveReport(i, stage.id, report);
 
         if (i < flow.stages.length - 1) {
@@ -266,6 +279,9 @@ export class Orchestrator extends EventEmitter {
     log(`Stage "${stage.name}" exitCode=${result.exitCode} responseLen=${result.text.length}`);
 
     const responseText = parseRunOutput(result.text);
+
+    savePromptLog(stageIndex, stage.id, prompt, responseText);
+    this.lastStageResponse = responseText;
 
     if (responseText) {
       this.emit("agent:message", responseText);
@@ -421,7 +437,8 @@ export class Orchestrator extends EventEmitter {
   private buildStageReport(
     stageIndex: number,
     stage: StageConfig,
-    action: StageAction
+    action: StageAction,
+    fullResponse: string
   ): StageReport {
     let filesChanged: string[] = action.issues.length > 0 ? [] : getGitDiffFiles();
     return {
@@ -430,6 +447,7 @@ export class Orchestrator extends EventEmitter {
       stageIndex,
       timestamp: new Date().toISOString(),
       summary: action.summary,
+      fullResponse,
       filesChanged,
       issues: action.issues,
       action,

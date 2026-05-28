@@ -69,6 +69,7 @@ export interface StageReport {
   stageIndex: number;
   timestamp: string;
   summary: string;
+  fullResponse: string;
   filesChanged: string[];
   issues: string[];
   action: StageAction;
