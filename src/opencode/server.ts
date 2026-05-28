@@ -188,7 +188,7 @@ export class ServerManager extends EventEmitter {
     log(`Running [${sessionLabel}]: ${bin} ${args.slice(0, 8).join(" ")} ... [prompt: ${prompt.length} chars]`);
     log(`Prompt preview: ${prompt.slice(0, 200).replace(/\n/g, "\\n")}`);
 
-    const workerResult = await this.runInWorker(bin, args, 300000);
+    const workerResult = await this.runInWorker(bin, args, 600000);
 
     log(`Exit code ${workerResult.exitCode}. stdout=${workerResult.stdout.length} stderr=${workerResult.stderr.length}`);
     if (workerResult.error) log(`Worker error: ${workerResult.error}`);

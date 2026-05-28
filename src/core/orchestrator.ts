@@ -6,6 +6,7 @@ import {
   StageReport,
   QualityGateResult,
   Checklist,
+  ReturnContext,
 } from "../config/schema.js";
 import {
   loadConfig,
@@ -29,9 +30,18 @@ import {
   getChecklistProgress,
 } from "./report.js";
 import { StageActionSchema } from "../config/schema.js";
+import {
+  scanConventions,
+  loadConventions,
+  buildConventionsPrompt,
+  getGitDiffFiles,
+  getGitDiffContent,
+  ProjectConventions,
+} from "./conventions.js";
 import { EventEmitter } from "node:events";
 import { mkdirSync, existsSync, readdirSync, statSync, appendFileSync } from "node:fs";
 import { join, relative, basename } from "node:path";
+import { execSync } from "node:child_process";
 
 function log(msg: string): void {
   const logPath = join(process.cwd(), ".flowcode", "debug.log");
@@ -71,6 +81,7 @@ export class Orchestrator extends EventEmitter {
   private interactiveStageIndex: number = -1;
   private interactiveStage: StageConfig | null = null;
   private interactiveFirstMessage = true;
+  private conventions: ProjectConventions | null = null;
 
   constructor(flowName: string = "default") {
     super();
@@ -100,6 +111,13 @@ export class Orchestrator extends EventEmitter {
     this.ensureFlowcodeDir();
     log("Orchestrator.start() — subprocess mode");
     await this.serverManager.start();
+
+    try {
+      this.conventions = scanConventions();
+      log(`Conventions scanned: ${this.conventions.language}, ${this.conventions.buildTool}, ${this.conventions.modules.length} modules`);
+    } catch (e) {
+      log(`Conventions scan failed: ${e}`);
+    }
 
     try {
       await this.runFlow();
@@ -160,6 +178,13 @@ export class Orchestrator extends EventEmitter {
         if (action.action === "return" && action.returnTo) {
           const returnIndex = flow.stages.findIndex((s) => s.id === action.returnTo);
           if (returnIndex >= 0) {
+            this.state.returnContext = {
+              fromStageId: stage.id,
+              fromStageName: stage.name,
+              issues: action.issues,
+              gitDiffFiles: getGitDiffFiles(),
+            };
+            log(`Return context set: from=${stage.id}, issues=${action.issues.length}, gitFiles=${this.state.returnContext.gitDiffFiles.length}`);
             this.state.currentStageIndex = returnIndex;
             saveState(this.state);
             i = returnIndex - 1;
@@ -252,6 +277,22 @@ export class Orchestrator extends EventEmitter {
       return action;
     }
 
+    if (responseText.length < 20) {
+      this.state.retryCount++;
+      log(`Stage "${stage.name}" returned empty/short response (${responseText.length} chars), retry ${this.state.retryCount}`);
+      saveState(this.state);
+      if (this.state.retryCount >= this.config.maxRetries) {
+        log(`Max retries reached for "${stage.name}", completing as error`);
+        return {
+          action: "complete",
+          summary: `Stage "${stage.name}" produced no usable output after ${this.config.maxRetries} retries`,
+          issues: [`empty/short response: "${responseText.slice(0, 50)}"`],
+        };
+      }
+      this.emit("stage:progress", stageIndex, `Empty response, retrying (${this.state.retryCount}/${this.config.maxRetries})...`);
+      return this.executeStage(stageIndex, stage);
+    }
+
     log(`No action parsed, completing stage "${stage.name}" as complete`);
     return {
       action: "complete",
@@ -297,6 +338,10 @@ export class Orchestrator extends EventEmitter {
     const context = buildContextFromReports(previousReports);
     const checklist = loadChecklist();
 
+    const isDiffReturn = this.state.returnContext
+      && this.state.returnContext.fromStageId !== stage.id
+      && stage.id === "implementation";
+
     let prompt = `# FLOWCODE STAGE: ${stage.name}\n\n`;
     prompt += `You are executing stage "${stage.name}" (ID: ${stage.id}) in a flowcode pipeline.\n\n`;
 
@@ -304,11 +349,33 @@ export class Orchestrator extends EventEmitter {
       prompt += `## MODE: INTERACTIVE\nYou are in interactive mode. Ask the user questions to understand the task. When you have a clear understanding, set action to "complete" with a detailed summary.\n\n`;
     }
 
+    if (this.conventions) {
+      prompt += buildConventionsPrompt(this.conventions) + "\n\n";
+    }
+
     if (skillsContent) {
       prompt += `## SKILLS (loaded for this stage)\n${skillsContent}\n\n`;
     }
 
-    if (context) {
+    if (isDiffReturn && this.state.returnContext) {
+      const rc = this.state.returnContext;
+      prompt += `## FIX REQUIRED — returning from ${rc.fromStageName}\n\n`;
+      prompt += `The previous stage "${rc.fromStageName}" found issues that need fixing in YOUR code.\n\n`;
+      if (rc.issues.length > 0) {
+        prompt += `### Issues to fix:\n`;
+        for (const issue of rc.issues) {
+          prompt += `- ${issue}\n`;
+        }
+        prompt += "\n";
+      }
+      const diffContent = getGitDiffContent();
+      if (diffContent) {
+        prompt += `### Current git diff (your recent changes):\n\`\`\`diff\n${diffContent}\n\`\`\`\n\n`;
+      } else if (rc.gitDiffFiles.length > 0) {
+        prompt += `### Files with changes:\n${rc.gitDiffFiles.map(f => `- ${f}`).join("\n")}\n\n`;
+      }
+      prompt += `**IMPORTANT:** Fix ONLY the listed issues. Do NOT re-explore the project, do NOT re-read files that haven't changed. Use the conventions and context above.\n\n`;
+    } else if (context) {
       prompt += `## CONTEXT FROM PREVIOUS STAGES\n${context}\n\n`;
     }
 
@@ -343,6 +410,11 @@ export class Orchestrator extends EventEmitter {
       prompt += `## RESPONSE FORMAT\nYou MUST respond with a valid JSON object:\n- action: "complete" (stage done), "restart" (re-run for next task), or "return" (go back)\n- summary: What was accomplished\n- issues: List of problems found (if any)\n\nIMPORTANT: Do your work FIRST using available tools, THEN provide the structured output as your final action.\n`;
     }
 
+    if (isDiffReturn) {
+      this.state.returnContext = undefined;
+      saveState(this.state);
+    }
+
     return prompt;
   }
 
@@ -351,13 +423,14 @@ export class Orchestrator extends EventEmitter {
     stage: StageConfig,
     action: StageAction
   ): StageReport {
+    let filesChanged: string[] = action.issues.length > 0 ? [] : getGitDiffFiles();
     return {
       stageId: stage.id,
       stageName: stage.name,
       stageIndex,
       timestamp: new Date().toISOString(),
       summary: action.summary,
-      filesChanged: [],
+      filesChanged,
       issues: action.issues,
       action,
     };

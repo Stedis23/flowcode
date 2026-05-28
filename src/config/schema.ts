@@ -43,6 +43,13 @@ export interface Checklist {
   items: ChecklistItem[];
 }
 
+export interface ReturnContext {
+  fromStageId: string;
+  fromStageName: string;
+  issues: string[];
+  gitDiffFiles: string[];
+}
+
 export interface FlowcodeState {
   currentFlow: string;
   currentStageIndex: number;
@@ -53,6 +60,7 @@ export interface FlowcodeState {
   retryCount: number;
   status: "running" | "paused" | "completed" | "error";
   errorMessage?: string;
+  returnContext?: ReturnContext;
 }
 
 export interface StageReport {

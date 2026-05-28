@@ -143,10 +143,16 @@ export function buildContextFromReports(reports: StageReport[]): string {
     return "";
   }
   return reports
-    .map(
-      (r) =>
-        `## ${r.stageName} (${r.stageId})\n${r.summary}\nFiles: ${r.filesChanged.join(", ")}\nIssues: ${r.issues.join(", ")}`
-    )
+    .map((r) => {
+      let ctx = `## ${r.stageName} (${r.stageId})\n${r.summary}`;
+      if (r.filesChanged.length > 0) {
+        ctx += `\nFiles changed: ${r.filesChanged.join(", ")}`;
+      }
+      if (r.issues.length > 0) {
+        ctx += `\nIssues:\n${r.issues.map((i) => `- ${i}`).join("\n")}`;
+      }
+      return ctx;
+    })
     .join("\n\n");
 }
 
