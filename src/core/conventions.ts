@@ -4,6 +4,7 @@ import {
   writeFileSync,
   readdirSync,
   statSync,
+  mkdirSync,
 } from "node:fs";
 import { join, relative } from "node:path";
 import { execSync } from "node:child_process";
@@ -69,7 +70,6 @@ function isStale(conv: ProjectConventions): boolean {
 export function saveConventions(conv: ProjectConventions): void {
   const dir = getFlowcodeDir();
   if (!existsSync(dir)) {
-    const { mkdirSync } = require("node:fs");
     mkdirSync(dir, { recursive: true });
   }
   writeFileSync(getConventionsPath(), JSON.stringify(conv, null, 2), "utf-8");

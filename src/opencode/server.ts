@@ -61,6 +61,8 @@ export interface ModelConfig {
 }
 
 const WORKER_CODE = `
+import { createRequire } from "node:module";
+const require = createRequire(import.meta.url);
 const { spawnSync } = require("child_process");
 const { workerData, parentPort } = require("worker_threads");
 try {

@@ -1,4 +1,4 @@
-import { readFileSync, existsSync } from "node:fs";
+import { readFileSync, existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { getGlobalSkillsDir } from "../config/loader.js";
 
@@ -33,7 +33,6 @@ export function listAvailableSkills(): string[] {
   if (!existsSync(skillsDir)) {
     return [];
   }
-  const { readdirSync } = require("node:fs");
   return readdirSync(skillsDir)
     .filter((f: string) => f.endsWith(".md"))
     .map((f: string) => f.replace(".md", ""));

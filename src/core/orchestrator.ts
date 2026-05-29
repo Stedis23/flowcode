@@ -39,7 +39,7 @@ import {
   ProjectConventions,
 } from "./conventions.js";
 import { EventEmitter } from "node:events";
-import { mkdirSync, existsSync, readdirSync, statSync, appendFileSync } from "node:fs";
+import { mkdirSync, existsSync, readdirSync, statSync, appendFileSync, writeFileSync } from "node:fs";
 import { join, relative, basename } from "node:path";
 import { execSync } from "node:child_process";
 
@@ -56,7 +56,6 @@ function savePromptLog(stageIndex: number, stageId: string, prompt: string, resp
   const prefix = String(stageIndex + 1).padStart(2, "0");
   const promptPath = join(dir, `${prefix}-${stageId}-prompt.txt`);
   const responsePath = join(dir, `${prefix}-${stageId}-response.txt`);
-  const { writeFileSync } = require("node:fs") as typeof import("node:fs");
   writeFileSync(promptPath, prompt, "utf-8");
   writeFileSync(responsePath, response, "utf-8");
   log(`Saved prompt log: ${promptPath} (${prompt.length} chars), response: ${responsePath} (${response.length} chars)`);
@@ -476,7 +475,7 @@ export class Orchestrator extends EventEmitter {
     if (stage.interactive) {
       prompt += `## RESPONSE FORMAT\nYou are in a CONVERSATION with the user. Follow these rules:\n\n1. ALWAYS offer the user numbered choices at the end of your message. Format:\nOPTIONS:\n1. First choice\n2. Second choice\n3. Third choice\n\n2. Keep options short (one line each). Offer 2-5 choices relevant to the current context.\n\n3. When the conversation is complete and the task is fully defined, end your response with:\n\`\`\`json\n{"action": "complete", "summary": "Task: ..."}\n\`\`\`\n\nDo NOT include JSON until you and the user have agreed on the task.\n`;
     } else {
-      prompt += `## RESPONSE FORMAT\nYou MUST respond with a valid JSON object:\n- action: "complete" (stage done), "restart" (re-run for next task), or "return" (go back)\n- summary: What was accomplished\n- issues: List of problems found (if any)\n\nIMPORTANT: Do your work FIRST using available tools, THEN provide the structured output as your final action.\n`;
+      prompt += `## RESPONSE FORMAT\nYou MUST respond with a valid JSON object:\n- action: "complete" (stage done), "restart" (re-run for next task), or "return" (go back)\n- summary: What was accomplished — include brief overview of the plan\n- issues: List of problems found (if any)\n\nIMPORTANT: Do your work FIRST using available tools, THEN provide the structured output as your final action.\n\nCRITICAL: Your plan must be DETAIL ENOUGH for an implementation stage to execute WITHOUT reading project files. Include:\n- Full file paths (relative to project root)\n- Package declarations\n- Class/method signatures\n- DI registration details\n- References to existing similar code in the project with full paths\n- Edge cases to handle\n\nThe implementation stage will NOT have time to explore the project. Your analysis IS their documentation.\n`;
     }
 
     if (isDiffReturn) {

@@ -7,6 +7,7 @@ import {
   parseAgentOptions,
 } from "../core/orchestrator.js";
 import { ServerManager, ModelConfig } from "../opencode/server.js";
+import { existsSync as _existsSync } from "node:fs";
 import {
   FlowcodeConfig,
   StageConfig,
@@ -597,7 +598,7 @@ function MainView({ orchestrator, flowName, onFlowComplete }: MainViewProps) {
       const atMatches = msg.match(/@(\S+)/g);
       const filePaths = atMatches
         ? atMatches.map((m) => m.slice(1)).filter((p) => {
-            try { return existsSync(p); } catch { return false; }
+            try { return _existsSync(p); } catch { return false; }
           })
         : [];
 
@@ -1161,8 +1162,7 @@ export default function App() {
 
 function existsSync(path: string): boolean {
   try {
-    const { existsSync: ex } = require("node:fs");
-    return ex(path);
+    return _existsSync(path);
   } catch {
     return false;
   }
