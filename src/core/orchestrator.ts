@@ -28,6 +28,7 @@ import {
   getNextPendingItem,
   getNextInProgressItem,
   getChecklistProgress,
+  addChecklistItems,
 } from "./report.js";
 import { StageActionSchema } from "../config/schema.js";
 import {
@@ -36,6 +37,7 @@ import {
   buildConventionsPrompt,
   getGitDiffFiles,
   getGitDiffContent,
+  stageChanges,
   ProjectConventions,
 } from "./conventions.js";
 import { EventEmitter } from "node:events";
@@ -257,6 +259,20 @@ export class Orchestrator extends EventEmitter {
           continue;
         }
 
+        if (action.action === "complete" && stage.id === "analysis" && action.checklist && action.checklist.length > 0) {
+          const existingChecklist = loadChecklist();
+          const updated = addChecklistItems(existingChecklist, action.checklist);
+          saveChecklist(updated);
+          this.state.checklist = updated;
+          saveState(this.state);
+          log(`Analysis checklist saved: ${updated.items.length} tasks`);
+        }
+
+        if (action.action === "complete" && (stage.id === "implementation" || stage.id === "lint")) {
+          stageChanges();
+          log(`Staged changes for stage "${stage.id}"`);
+        }
+
         const report = this.buildStageReport(i, stage, action, this.lastStageResponse);
         saveReport(i, stage.id, report);
 
@@ -337,6 +353,13 @@ export class Orchestrator extends EventEmitter {
     const action = parseStageAction(responseText);
     if (action) {
       log(`Parsed action: ${action.action} for stage "${stage.name}"`);
+      if (stage.id === "analysis" && action.action === "complete") {
+        const checklistTasks = extractChecklistFromAnalysis(this.lastStageResponse || responseText);
+        if (checklistTasks.length > 0) {
+          action.checklist = checklistTasks;
+          log(`Extracted ${checklistTasks.length} tasks from analysis plan`);
+        }
+      }
       return action;
     }
 
@@ -656,21 +679,46 @@ export class Orchestrator extends EventEmitter {
 export function scanProjectFiles(query: string, maxResults: number = 10): string[] {
   const cwd = process.cwd();
   const results: string[] = [];
+  const dirs = new Set<string>();
   const ignoreDirs = new Set(["node_modules", ".git", "dist", "build", ".flowcode", "__pycache__", ".gradle", ".idea", ".vs"]);
 
+  // Try git ls-files first (fast, only tracked files)
+  try {
+    const gitOutput = execSync("git ls-files", { encoding: "utf-8", cwd }).trim();
+    if (gitOutput) {
+      for (const line of gitOutput.split("\n")) {
+        const rel = line.replace(/\\/g, "/");
+        const parts = rel.split("/");
+        for (let i = 0; i < parts.length; i++) {
+          const dirPart = parts.slice(0, i + 1).join("/");
+          if (!query || dirPart.toLowerCase().includes(query.toLowerCase())) {
+            dirs.add(dirPart);
+          }
+        }
+        if (!query || rel.toLowerCase().includes(query.toLowerCase())) {
+          results.push(rel);
+        }
+      }
+    }
+  } catch {}
+
+  // Also walk filesystem to find untracked directories
   function walk(dir: string, depth: number) {
-    if (depth > 5 || results.length >= maxResults * 3) return;
+    if (depth > 4 || results.length + dirs.size >= maxResults * 3) return;
     try {
       const entries = readdirSync(dir, { withFileTypes: true });
       for (const entry of entries) {
-        if (results.length >= maxResults * 3) break;
+        if (results.length + dirs.size >= maxResults * 3) break;
         if (entry.name.startsWith(".") && entry.name !== ".flowcode") continue;
         const fullPath = join(dir, entry.name);
+        const rel = relative(cwd, fullPath).replace(/\\/g, "/");
         if (entry.isDirectory()) {
           if (ignoreDirs.has(entry.name)) continue;
+          if (!query || rel.toLowerCase().includes(query.toLowerCase())) {
+            dirs.add(rel);
+          }
           walk(fullPath, depth + 1);
         } else if (entry.isFile()) {
-          const rel = relative(cwd, fullPath).replace(/\\/g, "/");
           if (!query || rel.toLowerCase().includes(query.toLowerCase())) {
             results.push(rel);
           }
@@ -680,7 +728,12 @@ export function scanProjectFiles(query: string, maxResults: number = 10): string
   }
 
   walk(cwd, 0);
-  return results.slice(0, maxResults);
+
+  // Combine: directories first (sorted), then files (sorted)
+  const sortedDirs = Array.from(dirs).sort();
+  const sortedFiles = results.sort();
+  const combined = [...sortedDirs, ...sortedFiles];
+  return combined.slice(0, maxResults);
 }
 
 function parseRunOutput(raw: string): string {
@@ -716,6 +769,54 @@ function parseStageAction(text: string): StageAction | null {
   }
 
   return null;
+}
+
+function extractChecklistFromAnalysis(text: string): string[] {
+  const lines = text.split("\n");
+  const tasks: string[] = [];
+  let inPlan = false;
+  let currentTask = "";
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+
+    if (/^### \d+\.\s*\[.*?\]/.test(trimmed)) {
+      if (currentTask && tasks.length > 0) {
+        tasks[tasks.length - 1] = currentTask.trim();
+      }
+      currentTask = trimmed.replace(/^### \d+\.\s*/, "") + "\n";
+      inPlan = true;
+      continue;
+    }
+
+    if (inPlan && /^---$/.test(trimmed)) {
+      if (currentTask && tasks.length > 0) {
+        tasks[tasks.length - 1] = currentTask.trim();
+      }
+      currentTask = "";
+      continue;
+    }
+
+    if (inPlan && currentTask) {
+      if (trimmed.length > 0 && !trimmed.startsWith("```")) {
+        currentTask += trimmed + " ";
+      }
+    }
+
+    if (/^## /.test(trimmed) && !trimmed.includes("План")) {
+      if (currentTask && tasks.length > 0) {
+        tasks[tasks.length - 1] = currentTask.trim();
+      }
+      currentTask = "";
+      inPlan = false;
+    }
+  }
+
+  if (currentTask && tasks.length > 0) {
+    tasks[tasks.length - 1] = currentTask.trim();
+  }
+
+  return tasks.filter(t => t.length > 20);
 }
 
 export function parseAgentOptions(text: string): string[] {

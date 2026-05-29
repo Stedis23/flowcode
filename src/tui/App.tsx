@@ -157,27 +157,53 @@ interface FileAutocompleteProps {
 
 function FileAutocomplete({ query, selectedIndex, onSelect, visible }: FileAutocompleteProps) {
   const [files, setFiles] = useState<string[]>([]);
+  const maxVisible = 8;
 
   useEffect(() => {
     if (!visible || query.length === 0) {
       setFiles([]);
       return;
     }
-    const results = scanProjectFiles(query, 8);
+    const results = scanProjectFiles(query, 30);
     setFiles(results);
   }, [query, visible]);
 
   if (!visible || files.length === 0) return null;
 
+  // Auto-scroll: keep selectedIndex within visible range
+  let scrollOffset = 0;
+  if (selectedIndex >= scrollOffset + maxVisible) {
+    scrollOffset = selectedIndex - maxVisible + 1;
+  } else if (selectedIndex < scrollOffset) {
+    scrollOffset = Math.max(0, selectedIndex);
+  }
+  // Clamp
+  scrollOffset = Math.min(scrollOffset, Math.max(0, files.length - maxVisible));
+
+  const displayFiles = files.slice(scrollOffset, scrollOffset + maxVisible);
+  const hasMore = files.length > scrollOffset + maxVisible;
+  const hasPrevious = scrollOffset > 0;
+
   return (
     <Box flexDirection="column" borderStyle="single" borderColor="cyan" paddingX={1}>
-      {files.slice(0, 6).map((file, i) => (
-        <Text key={file} color={i === selectedIndex ? "cyan" : undefined} bold={i === selectedIndex}>
-          {i === selectedIndex ? " > " : "   "}{file}
-        </Text>
-      ))}
-      {files.length > 6 && (
-        <Text dimColor>   ...and {files.length - 6} more</Text>
+      {displayFiles.map((file, i) => {
+        const globalIndex = scrollOffset + i;
+        return (
+          <Text
+            key={`${scrollOffset}-${globalIndex}-${file}`}
+            color={globalIndex === selectedIndex ? "cyan" : undefined}
+            bold={globalIndex === selectedIndex}
+          >
+            {" "}
+            {globalIndex === selectedIndex ? "▸ " : "  "}{file}
+          </Text>
+        );
+      })}
+      {hasMore && (
+        <Text dimColor>   ↑↓ more ...</Text>
+      )}
+      {hasPrevious && (
+        <Text dimColor>   ↑ more ...</Text>
       )}
     </Box>
   );
@@ -245,6 +271,8 @@ interface ChatInputProps {
   autocompleteVisible: boolean;
   autocompleteIndex: number;
   autocompleteFiles: string[];
+  onAutocompleteSelectUp: () => void;
+  onAutocompleteSelectDown: () => void;
   inputBlocked?: boolean;
 }
 
@@ -257,27 +285,46 @@ function ChatInput({
   autocompleteVisible,
   autocompleteIndex,
   autocompleteFiles,
+  onAutocompleteSelectUp,
+  onAutocompleteSelectDown,
   inputBlocked,
 }: ChatInputProps) {
   useInput((input, key) => {
     if (disabled || inputBlocked) return;
 
-    if (autocompleteVisible && key.tab) {
-      if (autocompleteFiles.length > 0) {
+    // Autocomplete navigation and selection
+    if (autocompleteVisible && autocompleteFiles.length > 0) {
+      if (key.tab) {
         const file = autocompleteFiles[autocompleteIndex % autocompleteFiles.length];
         const lastAtIndex = value.lastIndexOf("@");
         if (lastAtIndex >= 0) {
           onChange(value.slice(0, lastAtIndex + 1) + file + " ");
         }
+        return;
       }
-      return;
-    }
 
-    if (autocompleteVisible && key.upArrow) {
-      return;
-    }
-    if (autocompleteVisible && key.downArrow) {
-      return;
+      if (key.upArrow) {
+        onAutocompleteSelectUp();
+        return;
+      }
+      if (key.downArrow) {
+        onAutocompleteSelectDown();
+        return;
+      }
+
+      // Enter selects the highlighted file
+      if (key.return) {
+        const file = autocompleteFiles[autocompleteIndex % autocompleteFiles.length];
+        const lastAtIndex = value.lastIndexOf("@");
+        if (lastAtIndex >= 0) {
+          onChange(value.slice(0, lastAtIndex + 1) + file + " ");
+        }
+        return;
+      }
+
+      if (key.escape) {
+        return;
+      }
     }
 
     if (key.return) {
@@ -285,12 +332,13 @@ function ChatInput({
       return;
     }
 
-    if (key.backspace || key.delete) {
-      onChange(value.slice(0, -1));
+    if (key.tab && !autocompleteVisible) {
+      // Tab without @ — do nothing or could trigger full file list
       return;
     }
 
-    if (key.escape && autocompleteVisible) {
+    if (key.backspace || key.delete) {
+      onChange(value.slice(0, -1));
       return;
     }
 
@@ -578,7 +626,7 @@ function MainView({ orchestrator, flowName, onFlowComplete }: MainViewProps) {
       if (query.length === 0 || !query.includes(" ")) {
         setAutocompleteVisible(true);
         setAutocompleteQuery(query);
-        const files = scanProjectFiles(query, 8);
+        const files = scanProjectFiles(query, 30);
         setAutocompleteFiles(files);
         setAutocompleteIndex(0);
         return;
@@ -788,6 +836,8 @@ function MainView({ orchestrator, flowName, onFlowComplete }: MainViewProps) {
                 autocompleteVisible={autocompleteVisible}
                 autocompleteIndex={autocompleteIndex}
                 autocompleteFiles={autocompleteFiles}
+                onAutocompleteSelectUp={() => setAutocompleteIndex((i) => Math.max(0, i - 1))}
+                onAutocompleteSelectDown={() => setAutocompleteIndex((i) => Math.min(autocompleteFiles.length - 1, i + 1))}
                 inputBlocked={optionsMode === "select"}
               />
             </>

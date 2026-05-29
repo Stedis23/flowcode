@@ -155,6 +155,16 @@ export function buildContextFromReports(reports: StageReport[]): string {
       if (r.issues.length > 0) {
         ctx += `\nIssues:\n${r.issues.map((i) => `- ${i}`).join("\n")}`;
       }
+      if (r.action && r.action.checklist && r.action.checklist.length > 0) {
+        ctx += `\n\nImplementation Plan Tasks:\n`;
+        for (const [idx, task] of r.action.checklist.entries()) {
+          ctx += `${idx + 1}. ${task}\n`;
+        }
+      }
+      if (r.fullResponse && r.stageId === "analysis" && r.fullResponse !== r.summary) {
+        const truncated = r.fullResponse.length > 8000 ? r.fullResponse.slice(0, 8000) + "\n...(truncated)" : r.fullResponse;
+        ctx += `\n\n---\nFull Analysis Details (implementation stage MUST read this):\n${truncated}`;
+      }
       return ctx;
     })
     .join("\n\n");

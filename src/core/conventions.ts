@@ -7,7 +7,7 @@ import {
   mkdirSync,
 } from "node:fs";
 import { join, relative } from "node:path";
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
 import { getFlowcodeDir } from "../config/loader.js";
 
 const CONVENTIONS_FILE = "conventions.json";
@@ -335,6 +335,12 @@ function findFilesRecursive(dir: string, pattern: RegExp | string, maxResults: n
   return results;
 }
 
+const IGNORED_PATHS = new Set([
+  ".flowcode/",
+  "node_modules/",
+  ".git/",
+]);
+
 export function getGitDiffFiles(): string[] {
   try {
     const output = execSync("git diff --name-only HEAD", {
@@ -343,9 +349,43 @@ export function getGitDiffFiles(): string[] {
       cwd: process.cwd(),
     }).trim();
     if (!output) return [];
-    return output.split("\n").filter(Boolean);
+    return output.split("\n").filter(Boolean).filter((f) => !IGNORED_PATHS.has(f) && !f.startsWith(".flowcode/") && !f.startsWith("node_modules/"));
   } catch {
     return [];
+  }
+}
+
+export function stageChanges(): void {
+  try {
+    const diffOutput = execSync("git diff --name-only HEAD", {
+      encoding: "utf-8",
+      timeout: 5000,
+      cwd: process.cwd(),
+    }).trim();
+    const stagedOutput = execSync("git ls-files --others --exclude-standard", {
+      encoding: "utf-8",
+      timeout: 5000,
+      cwd: process.cwd(),
+    }).trim();
+    const allFiles = [...diffOutput.split("\n"), ...stagedOutput.split("\n")]
+      .filter(Boolean)
+      .filter((f) => !f.startsWith(".flowcode/") && !f.startsWith("node_modules/"));
+    if (allFiles.length > 0) {
+      const result = spawnSync("git", ["add", ...allFiles], {
+        cwd: process.cwd(),
+        timeout: 10000,
+        stdio: "pipe",
+      });
+      if (result.error) {
+        console.error(`stageChanges failed: ${result.error.message}`);
+      } else {
+        console.log(`[flowcode] Staged ${allFiles.length} files for git`);
+      }
+    } else {
+      console.log("[flowcode] No changes to stage");
+    }
+  } catch (err) {
+    console.error(`stageChanges failed: ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 

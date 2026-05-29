@@ -29,6 +29,7 @@ export const StageActionSchema = z.object({
   summary: z.string(),
   returnTo: z.string().optional(),
   issues: z.array(z.string()).default([]),
+  checklist: z.array(z.string()).optional(),
 });
 
 export type StageAction = z.infer<typeof StageActionSchema>;
