@@ -342,6 +342,11 @@ function ChatInput({
       return;
     }
 
+    // Allow arrow keys for cursor movement (they don't modify value, just let them pass through)
+    if (key.leftArrow || key.rightArrow || key.upArrow || key.downArrow) {
+      return;
+    }
+
     if (input && !key.ctrl && !key.meta) {
       onChange(value + input);
     }
